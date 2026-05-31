@@ -1,0 +1,28 @@
+import type { MetadataRoute } from 'next'
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: '담 플래너',
+    short_name: '담 플래너',
+    description: '주간 플래너, 노트, 말씀, 캘린더',
+    start_url: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#faf5ff',
+    theme_color: '#7c3aed',
+    icons: [
+      {
+        src: '/icons/icon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any',
+      },
+      {
+        src: '/icons/icon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'maskable',
+      },
+    ],
+  }
+}
