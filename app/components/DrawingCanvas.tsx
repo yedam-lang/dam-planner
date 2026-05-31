@@ -11,7 +11,7 @@ const PEN_COLORS = [
   { value: '#f59e0b', label: '노랑' },
 ]
 
-const DRAFT_KEY = (dayKey: number) => `dam-canvas-draft-${dayKey}`
+const DRAFT_KEY = (dayKey: string) => `dam-canvas-draft-${dayKey}`
 
 type Props = {
   dayKey: string
