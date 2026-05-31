@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { loadCalendarEvents, saveCalendarEvent, deleteCalendarEvent } from '@/lib/db'
 
 // ── 타입 ──────────────────────────────────────────────
 export type RangeEvent = {
@@ -154,23 +155,23 @@ export default function CalendarView() {
   const gridRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('dam-calendar-events')
-      if (raw) {
-        const data = JSON.parse(raw)
-        setEvents(migrate(data.events))
-        setNextId(data.nextId ?? 0)
-      }
-    } catch {}
+    loadCalendarEvents().then(data => {
+      if (!data) return
+      const mapped: RangeEvent[] = data.map((row: { local_id: number; title: string; color: string; start_date: string; end_date: string }) => ({
+        id: row.local_id,
+        title: row.title,
+        color: row.color,
+        start: row.start_date,
+        end: row.end_date,
+      }))
+      setEvents(mapped)
+      if (mapped.length > 0) setNextId(Math.max(...mapped.map(e => e.id)) + 1)
+    })
   }, [])
 
   useEffect(() => {
     if (selStart) setTimeout(() => inputRef.current?.focus(), 60)
   }, [selStart])
-
-  const save = (next: RangeEvent[], nid: number) => {
-    try { localStorage.setItem('dam-calendar-events', JSON.stringify({ events: next, nextId: nid })) } catch {}
-  }
 
   const prevMonth = () => {
     if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11) }
@@ -211,13 +212,13 @@ export default function CalendarView() {
     const [s, e] = sortedPair(rs, re)
     const next = [...events, { id: nextId, title, color: selectedColor, start: s, end: e }]
     setEvents(next); setNextId(nextId + 1)
-    save(next, nextId + 1)
+    saveCalendarEvent({ local_id: nextId, title, color: selectedColor, start: s, end: e })
     setInputText('')
   }
 
   const deleteEvent = (id: number) => {
-    const next = events.filter(e => e.id !== id)
-    setEvents(next); save(next, nextId)
+    setEvents(events.filter(e => e.id !== id))
+    deleteCalendarEvent(id)
   }
 
   const closePanel = () => { setSelStart(null); setSelEnd(null); setInputText('') }
