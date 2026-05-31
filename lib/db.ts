@@ -95,7 +95,7 @@ export async function loadWeekGoal(weekKey: string): Promise<string> {
     .from('week_goals')
     .select('goal')
     .eq('user_id', uid)
-    .eq('week_key', weekKey)
+    .eq('week_date', weekKey)
     .maybeSingle()
   return data?.goal ?? ''
 }
@@ -105,9 +105,9 @@ export async function saveWeekGoal(weekKey: string, goal: string) {
   if (!uid) return
   await supabase.from('week_goals').upsert({
     user_id: uid,
-    week_key: weekKey,
+    week_date: weekKey,
     goal,
-  }, { onConflict: 'user_id,week_key' })
+  }, { onConflict: 'user_id,week_date' })
 }
 
 // ── Week Calendar Events (from calendar_events table) ──
