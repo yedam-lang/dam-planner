@@ -138,6 +138,7 @@ export default function WeeklyPlanner() {
     const newTodo: Todo = { id: localId, text, done: false }
     setTodos(prev => prev.map((list, i) => i === dayIdx ? [...list, newTodo] : list))
     upsertTodo({ week_key: weekKey, day_index: dayIdx, local_id: localId, text, done: false })
+      .catch(err => console.error('[upsertTodo] addTodo 실패:', err))
     setInputs(prev => prev.map((v, i) => (i === dayIdx ? '' : v)))
   }
 
@@ -148,6 +149,7 @@ export default function WeeklyPlanner() {
       )
       const todo = next[dayIdx].find(t => t.id === id)
       if (todo) upsertTodo({ week_key: weekKey, day_index: dayIdx, local_id: id, text: todo.text, done: todo.done })
+        .catch(err => console.error('[upsertTodo] toggleTodo 실패:', err))
       return next
     })
   }

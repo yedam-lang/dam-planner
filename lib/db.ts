@@ -53,7 +53,7 @@ export async function loadTodos(weekKey: string) {
     .from('todos')
     .select('*')
     .eq('user_id', uid)
-    .eq('week_key', weekKey)
+    .eq('week_date', weekKey)
     .order('local_id')
   return data
 }
@@ -69,12 +69,12 @@ export async function upsertTodo(todo: {
   if (!uid) return
   await supabase.from('todos').upsert({
     user_id: uid,
-    week_key: todo.week_key,
+    week_date: todo.week_key,
     day_index: todo.day_index,
     local_id: todo.local_id,
     text: todo.text,
     done: todo.done,
-  }, { onConflict: 'user_id,week_key,local_id' })
+  }, { onConflict: 'user_id,week_date,local_id' })
 }
 
 export async function deleteTodo(weekKey: string, local_id: number) {
@@ -83,7 +83,7 @@ export async function deleteTodo(weekKey: string, local_id: number) {
   await supabase.from('todos')
     .delete()
     .eq('user_id', uid)
-    .eq('week_key', weekKey)
+    .eq('week_date', weekKey)
     .eq('local_id', local_id)
 }
 
