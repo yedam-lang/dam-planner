@@ -2,6 +2,14 @@
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react'
 import DrawingCanvas from './DrawingCanvas'
+import {
+  loadTodos as dbLoadTodos,
+  upsertTodo,
+  deleteTodo as dbDeleteTodo,
+  loadWeekGoal,
+  saveWeekGoal,
+  loadWeekCalendarEvents,
+} from '@/lib/db'
 
 type Todo = { id: number; text: string; done: boolean }
 type CalEvent = { id: number; title: string; color: string; dateKey: string }
@@ -50,55 +58,10 @@ function weekLabel(offset: number): string {
   return offset < 0 ? `${-offset}주 전` : `${offset}주 후`
 }
 
-// ── localStorage 헬퍼 ───────────────────────────────────
-const TODOS_KEY   = (wk: string) => `dam-todos-${wk}`
-const GOAL_KEY    = (wk: string) => `dam-goal-${wk}`
+// ── localStorage 헬퍼 (캔버스·checked만 유지) ──────────
 const SAVED_KEY   = (wk: string, i: number) => `dam-canvas-saved-${wk}-${i}`
 const DAY_KEY     = (wk: string, i: number) => `${wk}-${i}`
 const CHECKED_KEY = (wk: string) => `dam-cal-checked-${wk}`
-
-function loadTodos(wk: string): Todo[][] {
-  try {
-    const raw = localStorage.getItem(TODOS_KEY(wk))
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  return DAYS.map(() => [])
-}
-
-function loadGoal(wk: string): string {
-  return localStorage.getItem(GOAL_KEY(wk)) ?? ''
-}
-
-function loadWeekEvents(weekStart: Date): CalEvent[] {
-  try {
-    const raw = localStorage.getItem('dam-calendar-events')
-    if (!raw) return []
-    const data = JSON.parse(raw)
-    const evData = data.events ?? []
-    const weekKeys = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(weekStart.getTime() + i * 86400000)
-      return toKey(d)
-    })
-    const result: CalEvent[] = []
-    if (Array.isArray(evData)) {
-      // 신 형식: RangeEvent[]
-      for (const ev of evData as Array<{ id: number; title: string; color: string; start: string; end: string }>) {
-        for (const dk of weekKeys) {
-          if (dk >= ev.start && dk <= ev.end) result.push({ id: ev.id, title: ev.title, color: ev.color, dateKey: dk })
-        }
-      }
-    } else {
-      // 구 형식: Record<dateKey, Event[]>
-      for (const dk of weekKeys) {
-        for (const ev of (evData[dk] ?? []) as Array<{ id: number; title: string; color: string }>) {
-          result.push({ ...ev, dateKey: dk })
-        }
-      }
-    }
-    return result
-  } catch {}
-  return []
-}
 
 function loadChecked(wk: string): Set<number> {
   try {
@@ -137,13 +100,25 @@ export default function WeeklyPlanner() {
 
   // 주가 바뀔 때 데이터 로드
   useEffect(() => {
-    setTodos(loadTodos(weekKey))
-    setGoal(loadGoal(weekKey))
     setInputs(DAYS.map(() => ''))
     setCanvasOpen(DAYS.map(() => false))
     setSavedImages(DAYS.map((_, i) => localStorage.getItem(SAVED_KEY(weekKey, i))))
-    setCalEvents(loadWeekEvents(weekStart))
     setChecked(loadChecked(weekKey))
+
+    dbLoadTodos(weekKey).then(data => {
+      if (!data) return
+      const grid: Todo[][] = DAYS.map(() => [])
+      for (const row of data as { day_index: number; local_id: number; text: string; done: boolean }[]) {
+        if (row.day_index >= 0 && row.day_index < 7) {
+          grid[row.day_index].push({ id: row.local_id, text: row.text, done: row.done })
+        }
+      }
+      setTodos(grid)
+    })
+
+    loadWeekGoal(weekKey).then(setGoal)
+
+    loadWeekCalendarEvents(weekStart).then(setCalEvents)
   }, [weekKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleChecked = (id: number) => {
@@ -159,28 +134,27 @@ export default function WeeklyPlanner() {
   const addTodo = (dayIdx: number) => {
     const text = inputs[dayIdx].trim()
     if (!text) return
-    const next = todos.map((list, i) =>
-      i === dayIdx ? [...list, { id: Date.now(), text, done: false }] : list
-    )
-    setTodos(next)
-    try { localStorage.setItem(TODOS_KEY(weekKey), JSON.stringify(next)) } catch {}
+    const localId = Date.now()
+    const newTodo: Todo = { id: localId, text, done: false }
+    setTodos(prev => prev.map((list, i) => i === dayIdx ? [...list, newTodo] : list))
+    upsertTodo({ week_key: weekKey, day_index: dayIdx, local_id: localId, text, done: false })
     setInputs(prev => prev.map((v, i) => (i === dayIdx ? '' : v)))
   }
 
   const toggleTodo = (dayIdx: number, id: number) => {
-    const next = todos.map((list, i) =>
-      i === dayIdx ? list.map(t => t.id === id ? { ...t, done: !t.done } : t) : list
-    )
-    setTodos(next)
-    try { localStorage.setItem(TODOS_KEY(weekKey), JSON.stringify(next)) } catch {}
+    setTodos(prev => {
+      const next = prev.map((list, i) =>
+        i === dayIdx ? list.map(t => t.id === id ? { ...t, done: !t.done } : t) : list
+      )
+      const todo = next[dayIdx].find(t => t.id === id)
+      if (todo) upsertTodo({ week_key: weekKey, day_index: dayIdx, local_id: id, text: todo.text, done: todo.done })
+      return next
+    })
   }
 
   const deleteTodo = (dayIdx: number, id: number) => {
-    const next = todos.map((list, i) =>
-      i === dayIdx ? list.filter(t => t.id !== id) : list
-    )
-    setTodos(next)
-    try { localStorage.setItem(TODOS_KEY(weekKey), JSON.stringify(next)) } catch {}
+    setTodos(prev => prev.map((list, i) => i === dayIdx ? list.filter(t => t.id !== id) : list))
+    dbDeleteTodo(weekKey, id)
   }
 
   const handleKey = (e: KeyboardEvent<HTMLInputElement>, dayIdx: number) => {
@@ -204,6 +178,8 @@ export default function WeeklyPlanner() {
 
   // ── Goal ──────────────────────────────────────────────
   const goalRef = useRef<HTMLTextAreaElement>(null)
+  const goalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     const el = goalRef.current
     if (!el) return
@@ -212,8 +188,12 @@ export default function WeeklyPlanner() {
   }, [goal])
 
   const handleGoal = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setGoal(e.target.value)
-    try { localStorage.setItem(GOAL_KEY(weekKey), e.target.value) } catch {}
+    const value = e.target.value
+    setGoal(value)
+    if (goalTimerRef.current) clearTimeout(goalTimerRef.current)
+    goalTimerRef.current = setTimeout(() => {
+      saveWeekGoal(weekKey, value)
+    }, 300)
   }
 
   // ── Render ────────────────────────────────────────────
