@@ -74,7 +74,7 @@ export async function upsertTodo(todo: {
     local_id: todo.local_id,
     text: todo.text,
     done: todo.done,
-  }, { onConflict: 'user_id,week_date,local_id' })
+  })
 }
 
 export async function deleteTodo(weekKey: string, local_id: number) {
