@@ -74,12 +74,26 @@ function loadWeekEvents(weekStart: Date): CalEvent[] {
     const raw = localStorage.getItem('dam-calendar-events')
     if (!raw) return []
     const data = JSON.parse(raw)
-    const map: Record<string, Array<{ id: number; title: string; color: string }>> = data.events ?? {}
-    const result: CalEvent[] = []
-    for (let i = 0; i < 7; i++) {
+    const evData = data.events ?? []
+    const weekKeys = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart.getTime() + i * 86400000)
-      const dk = toKey(d)
-      for (const ev of map[dk] ?? []) result.push({ ...ev, dateKey: dk })
+      return toKey(d)
+    })
+    const result: CalEvent[] = []
+    if (Array.isArray(evData)) {
+      // 신 형식: RangeEvent[]
+      for (const ev of evData as Array<{ id: number; title: string; color: string; start: string; end: string }>) {
+        for (const dk of weekKeys) {
+          if (dk >= ev.start && dk <= ev.end) result.push({ id: ev.id, title: ev.title, color: ev.color, dateKey: dk })
+        }
+      }
+    } else {
+      // 구 형식: Record<dateKey, Event[]>
+      for (const dk of weekKeys) {
+        for (const ev of (evData[dk] ?? []) as Array<{ id: number; title: string; color: string }>) {
+          result.push({ ...ev, dateKey: dk })
+        }
+      }
     }
     return result
   } catch {}
