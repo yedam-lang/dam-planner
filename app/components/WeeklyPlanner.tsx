@@ -34,6 +34,14 @@ function getWeekStart(offset: number): Date {
   return d
 }
 
+function getWeekDates(weekStart: Date): Date[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart)
+    d.setDate(weekStart.getDate() + i)
+    return d
+  })
+}
+
 function toKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -87,6 +95,7 @@ export default function WeeklyPlanner() {
 
   const [weekOffset, setWeekOffset] = useState(0)
   const weekStart  = getWeekStart(weekOffset)
+  const weekDates  = getWeekDates(weekStart)
   const weekKey    = toKey(weekStart)
   const isThisWeek = weekOffset === 0
 
@@ -245,7 +254,7 @@ export default function WeeklyPlanner() {
         )}
       </header>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 max-w-screen-xl mx-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 max-w-screen-xl mx-auto">
 
         {/* ── 요일 카드 7개 ─────────────────────────────── */}
         {DAYS.map((dayName, dayIdx) => {
@@ -267,7 +276,7 @@ export default function WeeklyPlanner() {
                 <div className="flex items-baseline gap-1.5">
                   <span className="font-semibold text-slate-700 text-sm">{dayName}</span>
                   <span className="text-xs text-slate-500">
-                    {weekStart.getMonth() + 1}/{new Date(weekStart.getTime() + dayIdx * 86400000).getDate()}
+                    {weekDates[dayIdx].getMonth() + 1}/{weekDates[dayIdx].getDate()}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -309,7 +318,7 @@ export default function WeeklyPlanner() {
 
               {/* 캘린더 일정 */}
               {(() => {
-                const dayDateKey = toKey(new Date(weekStart.getTime() + dayIdx * 86400000))
+                const dayDateKey = toKey(weekDates[dayIdx])
                 const dayEvents = calEvents.filter(ev => ev.dateKey === dayDateKey)
                 if (dayEvents.length === 0) return null
                 const DOT: Record<string, string> = {
