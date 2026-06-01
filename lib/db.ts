@@ -220,3 +220,109 @@ export async function deleteNoteBody(cardId: string) {
   if (!uid) return
   await supabase.from('note_bodies').delete().eq('user_id', uid).eq('card_id', cardId)
 }
+
+// ── Word Cards ─────────────────────────────────────────
+export async function loadWordCards() {
+  const uid = await getUserId()
+  if (!uid) return null
+  const { data } = await supabase
+    .from('word_cards')
+    .select('*')
+    .eq('user_id', uid)
+    .order('created_at', { ascending: false })
+  return data
+}
+
+export async function upsertWordCard(card: {
+  local_id: number
+  verse: string
+  ref: string
+}) {
+  const uid = await getUserId()
+  if (!uid) return
+
+  const { data: existing } = await supabase
+    .from('word_cards')
+    .select('id')
+    .eq('user_id', uid)
+    .eq('local_id', card.local_id)
+    .maybeSingle()
+
+  if (existing) {
+    await supabase.from('word_cards')
+      .update({ verse: card.verse, ref: card.ref })
+      .eq('user_id', uid)
+      .eq('local_id', card.local_id)
+  } else {
+    await supabase.from('word_cards').insert({
+      user_id: uid,
+      local_id: card.local_id,
+      verse: card.verse,
+      ref: card.ref,
+    })
+  }
+}
+
+export async function deleteWordCard(local_id: number) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('word_cards')
+    .delete()
+    .eq('user_id', uid)
+    .eq('local_id', local_id)
+}
+
+// ── Word Entries ───────────────────────────────────────
+export async function loadWordEntries() {
+  const uid = await getUserId()
+  if (!uid) return null
+  const { data } = await supabase
+    .from('word_entries')
+    .select('*')
+    .eq('user_id', uid)
+    .order('created_at', { ascending: false })
+  return data
+}
+
+export async function upsertWordEntry(entry: {
+  local_id: number
+  date: string
+  ref: string
+  verse: string
+  reflection: string
+}) {
+  const uid = await getUserId()
+  if (!uid) return
+
+  const { data: existing } = await supabase
+    .from('word_entries')
+    .select('id')
+    .eq('user_id', uid)
+    .eq('local_id', entry.local_id)
+    .maybeSingle()
+
+  if (existing) {
+    await supabase.from('word_entries')
+      .update({ date: entry.date, ref: entry.ref, verse: entry.verse, reflection: entry.reflection })
+      .eq('user_id', uid)
+      .eq('local_id', entry.local_id)
+  } else {
+    await supabase.from('word_entries').insert({
+      user_id: uid,
+      local_id: entry.local_id,
+      date: entry.date,
+      ref: entry.ref,
+      verse: entry.verse,
+      reflection: entry.reflection,
+    })
+  }
+}
+
+export async function deleteWordEntry(local_id: number) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('word_entries')
+    .delete()
+    .eq('user_id', uid)
+    .eq('local_id', local_id)
+}

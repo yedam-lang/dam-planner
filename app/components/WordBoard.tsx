@@ -1,6 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import {
+  loadWordCards, upsertWordCard, deleteWordCard,
+  loadWordEntries, upsertWordEntry, deleteWordEntry,
+} from '@/lib/db'
 
 // ── 타입 ──────────────────────────────────────────────
 type VerseCard = { id: number; verse: string; ref: string }
@@ -50,11 +54,34 @@ export default function WordBoard() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
   useEffect(() => {
-    try {
-      const rc = localStorage.getItem(CARDS_KEY);   if (rc) setCards(JSON.parse(rc))
-      const re = localStorage.getItem(ENTRIES_KEY); if (re) setEntries(JSON.parse(re))
-    } catch {}
-  }, [])
+  // Supabase에서 불러오기, 없으면 localStorage fallback
+  loadWordCards().then(data => {
+    if (data) {
+      setCards(data.map(r => ({ id: r.local_id, verse: r.verse, ref: r.ref ?? '' })))
+    } else {
+      try {
+        const rc = localStorage.getItem(CARDS_KEY)
+        if (rc) setCards(JSON.parse(rc))
+      } catch {}
+    }
+  })
+  loadWordEntries().then(data => {
+    if (data) {
+      setEntries(data.map(r => ({
+        id: r.local_id,
+        date: r.date,
+        ref: r.ref ?? '',
+        verse: r.verse ?? '',
+        reflection: r.reflection ?? '',
+      })))
+    } else {
+      try {
+        const re = localStorage.getItem(ENTRIES_KEY)
+        if (re) setEntries(JSON.parse(re))
+      } catch {}
+    }
+  })
+}, [])
 
   useEffect(() => { if (addingCard)  cardVerseRef.current?.focus() },  [addingCard])
   useEffect(() => { if (addingEntry) entryRefInput.current?.focus() }, [addingEntry])
@@ -62,26 +89,37 @@ export default function WordBoard() {
   // ── 말씀 카드 ─────────────────────────────────────
   const confirmCard = () => {
     if (!cardVerse.trim()) { setAddingCard(false); return }
-    const next = [{ id: Date.now(), verse: cardVerse.trim(), ref: cardRef.trim() }, ...cards]
-    setCards(next); saveCards(next)
+    const local_id = Math.floor(Math.random() * 1e12)
+    const newCard = { id: local_id, verse: cardVerse.trim(), ref: cardRef.trim() }
+    const next = [newCard, ...cards]
+    setCards(next)
+    saveCards(next) // localStorage 백업
+    upsertWordCard({ local_id, verse: newCard.verse, ref: newCard.ref })
     setCardVerse(''); setCardRef(''); setAddingCard(false)
   }
 
   const deleteCard = (id: number) => {
-    const next = cards.filter(c => c.id !== id); setCards(next); saveCards(next)
+    const next = cards.filter(c => c.id !== id)
+    setCards(next); saveCards(next)
+    deleteWordCard(id)
   }
 
   // ── 묵상 기록 ────────────────────────────────────
-  const confirmEntry = () => {
-    if (!form.verse.trim() && !form.ref.trim()) { setAddingEntry(false); return }
-    const next = [{ id: Date.now(), ...form }, ...entries]
-    setEntries(next); saveEntries(next)
-    setForm({ date: today(), ref: '', verse: '', reflection: '' }); setAddingEntry(false)
-  }
+const confirmEntry = () => {
+  if (!form.verse.trim() && !form.ref.trim()) { setAddingEntry(false); return }
+  const local_id = Math.floor(Math.random() * 1e12)
+  const newEntry = { id: local_id, ...form }
+  const next = [newEntry, ...entries]
+  setEntries(next); saveEntries(next)
+  upsertWordEntry({ local_id, ...form })
+  setForm({ date: today(), ref: '', verse: '', reflection: '' }); setAddingEntry(false)
+}
 
-  const deleteEntry = (id: number) => {
-    const next = entries.filter(e => e.id !== id); setEntries(next); saveEntries(next)
-  }
+const deleteEntry = (id: number) => {
+  const next = entries.filter(e => e.id !== id)
+  setEntries(next); saveEntries(next)
+  deleteWordEntry(id)
+}
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-sky-50 px-4 py-10">
