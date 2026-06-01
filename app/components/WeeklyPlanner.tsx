@@ -143,7 +143,7 @@ export default function WeeklyPlanner() {
   const addTodo = (dayIdx: number) => {
     const text = inputs[dayIdx].trim()
     if (!text) return
-    const localId = Date.now()
+    const localId = Math.floor(Math.random() * 2000000000)
     const newTodo: Todo = { id: localId, text, done: false }
     setTodos(prev => prev.map((list, i) => i === dayIdx ? [...list, newTodo] : list))
     upsertTodo({ week_key: weekKey, day_index: dayIdx, local_id: localId, text, done: false })
