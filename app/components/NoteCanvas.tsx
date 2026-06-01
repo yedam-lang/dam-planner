@@ -13,24 +13,26 @@ type Props = { noteId: string }
 export default function NoteCanvas({ noteId }: Props) {
   const STORAGE_KEY = `dam-note-canvas-${noteId}`
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
   const [penColor, setPenColor] = useState('#374151')
   const [isEraser, setIsEraser] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
+  const [canvasHeight, setCanvasHeight] = useState(320)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isResizing = useRef(false)
+  const resizeStartY = useRef(0)
+  const resizeStartH = useRef(0)
 
   const save = useCallback((showFeedback = false) => {
     const canvas = canvasRef.current
     if (!canvas) return
     const dataUrl = canvas.toDataURL('image/png')
     try { localStorage.setItem(STORAGE_KEY, dataUrl) } catch {}
-
-    // Supabase에 캔버스 저장
     upsertNoteBody(noteId, '', dataUrl).catch(err =>
       console.error('[NoteCanvas] 저장 실패:', err)
     )
-
     if (showFeedback) {
       const now = new Date()
       const hh = String(now.getHours()).padStart(2, '0')
@@ -64,7 +66,6 @@ export default function NoteCanvas({ noteId }: Props) {
   }, [STORAGE_KEY])
 
   useEffect(() => {
-    // Supabase에서 캔버스 데이터 로드
     loadNoteBody(noteId).then(data => {
       if (data?.canvas_data) {
         requestAnimationFrame(() => initCanvas(data.canvas_data))
@@ -73,6 +74,14 @@ export default function NoteCanvas({ noteId }: Props) {
       }
     })
   }, [noteId, initCanvas])
+
+  // 높이 바뀔 때 캔버스 재초기화
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const snapshot = canvas.toDataURL('image/png')
+    requestAnimationFrame(() => initCanvas(snapshot))
+  }, [canvasHeight, initCanvas])
 
   const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect()
@@ -117,8 +126,28 @@ export default function NoteCanvas({ noteId }: Props) {
     save()
   }
 
+  // ── 리사이즈 핸들 ─────────────────────────────────────
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    isResizing.current = true
+    resizeStartY.current = e.clientY
+    resizeStartH.current = canvasHeight
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isResizing.current) return
+    const delta = e.clientY - resizeStartY.current
+    const newH = Math.max(160, Math.min(1200, resizeStartH.current + delta))
+    setCanvasHeight(newH)
+  }
+
+  const endResize = () => {
+    isResizing.current = false
+  }
+
   return (
-    <div className="rounded-2xl overflow-hidden ring-1 ring-black/10 shadow-sm">
+    <div ref={containerRef} className="rounded-2xl overflow-hidden ring-1 ring-black/10 shadow-sm">
+      {/* 툴바 */}
       <div className="bg-slate-100 flex items-center gap-2 px-3 py-2">
         <div className="flex items-center gap-1.5">
           {PEN_COLORS.map(c => (
@@ -160,11 +189,12 @@ export default function NoteCanvas({ noteId }: Props) {
         </div>
       </div>
 
+      {/* 캔버스 */}
       <canvas
         ref={canvasRef}
         style={{
           width: '100%',
-          height: '320px',
+          height: `${canvasHeight}px`,
           display: 'block',
           cursor: isEraser ? 'cell' : 'crosshair',
           touchAction: 'none',
@@ -174,6 +204,17 @@ export default function NoteCanvas({ noteId }: Props) {
         onPointerUp={endDraw}
         onPointerLeave={endDraw}
       />
+
+      {/* 리사이즈 핸들 */}
+      <div
+        onPointerDown={startResize}
+        onPointerMove={onResize}
+        onPointerUp={endResize}
+        onPointerLeave={endResize}
+        className="h-3 bg-slate-100 flex items-center justify-center cursor-ns-resize hover:bg-slate-200 transition-colors select-none"
+      >
+        <div className="w-8 h-1 rounded-full bg-slate-300" />
+      </div>
     </div>
   )
 }
