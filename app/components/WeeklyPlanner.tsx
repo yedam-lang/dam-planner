@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react'
-import DrawingCanvas from './DrawingCanvas'
 import {
   loadTodos as dbLoadTodos,
   upsertTodo,
@@ -9,6 +8,8 @@ import {
   loadWeekGoal,
   saveWeekGoal,
   loadWeekCalendarEvents,
+  loadDiaryEntry,
+  saveDiaryEntry,
 } from '@/lib/db'
 
 type Todo = { id: number; text: string; done: boolean }
@@ -66,9 +67,7 @@ function weekLabel(offset: number): string {
   return offset < 0 ? `${-offset}주 전` : `${offset}주 후`
 }
 
-// ── localStorage 헬퍼 (캔버스·checked만 유지) ──────────
-const SAVED_KEY   = (wk: string, i: number) => `dam-canvas-saved-${wk}-${i}`
-const DAY_KEY     = (wk: string, i: number) => `${wk}-${i}`
+// ── localStorage 헬퍼 ──────────────────────────────────
 const CHECKED_KEY = (wk: string) => `dam-cal-checked-${wk}`
 
 function loadChecked(wk: string): Set<number> {
@@ -77,17 +76,6 @@ function loadChecked(wk: string): Set<number> {
     if (raw) return new Set(JSON.parse(raw))
   } catch {}
   return new Set()
-}
-
-function PenIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-      className="w-3.5 h-3.5">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  )
 }
 
 export default function WeeklyPlanner() {
@@ -99,19 +87,20 @@ export default function WeeklyPlanner() {
   const weekKey    = toKey(weekStart)
   const isThisWeek = weekOffset === 0
 
-  const [todos,       setTodos]       = useState<Todo[][]>(DAYS.map(() => []))
-  const [inputs,      setInputs]      = useState<string[]>(DAYS.map(() => ''))
-  const [goal,        setGoal]        = useState('')
-  const [canvasOpen,  setCanvasOpen]  = useState<boolean[]>(DAYS.map(() => false))
-  const [savedImages, setSavedImages] = useState<(string | null)[]>(DAYS.map(() => null))
-  const [calEvents,   setCalEvents]   = useState<CalEvent[]>([])
-  const [checked,     setChecked]     = useState<Set<number>>(new Set())
+  const [todos,      setTodos]      = useState<Todo[][]>(DAYS.map(() => []))
+  const [inputs,     setInputs]     = useState<string[]>(DAYS.map(() => ''))
+  const [goal,       setGoal]       = useState('')
+  const [diaryOpen,  setDiaryOpen]  = useState<boolean[]>(DAYS.map(() => false))
+  const [diaryTexts, setDiaryTexts] = useState<string[]>(DAYS.map(() => ''))
+  const [calEvents,  setCalEvents]  = useState<CalEvent[]>([])
+  const [checked,    setChecked]    = useState<Set<number>>(new Set())
+  const diaryTimers = useRef<(ReturnType<typeof setTimeout> | null)[]>(DAYS.map(() => null))
 
   // 주가 바뀔 때 데이터 로드
   useEffect(() => {
     setInputs(DAYS.map(() => ''))
-    setCanvasOpen(DAYS.map(() => false))
-    setSavedImages(DAYS.map((_, i) => localStorage.getItem(SAVED_KEY(weekKey, i))))
+    setDiaryOpen(DAYS.map(() => false))
+    setDiaryTexts(DAYS.map(() => ''))
     setChecked(loadChecked(weekKey))
 
     dbLoadTodos(weekKey).then(data => {
@@ -126,8 +115,13 @@ export default function WeeklyPlanner() {
     })
 
     loadWeekGoal(weekKey).then(setGoal)
-
     loadWeekCalendarEvents(weekStart).then(setCalEvents)
+
+    DAYS.forEach((_, i) => {
+      loadDiaryEntry(weekKey, i).then(content => {
+        setDiaryTexts(prev => prev.map((v, idx) => idx === i ? content : v))
+      })
+    })
   }, [weekKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleChecked = (id: number) => {
@@ -172,19 +166,16 @@ export default function WeeklyPlanner() {
     if (e.key === 'Enter') addTodo(dayIdx)
   }
 
-  // ── Canvas ────────────────────────────────────────────
-  const toggleCanvas = (dayIdx: number) =>
-    setCanvasOpen(prev => prev.map((v, i) => (i === dayIdx ? !v : v)))
+  // ── Diary ─────────────────────────────────────────────
+  const toggleDiary = (dayIdx: number) =>
+    setDiaryOpen(prev => prev.map((v, i) => i === dayIdx ? !v : v))
 
-  const handleCanvasSave = (dayIdx: number, dataUrl: string) => {
-    setSavedImages(prev => prev.map((v, i) => (i === dayIdx ? dataUrl : v)))
-    try { localStorage.setItem(SAVED_KEY(weekKey, dayIdx), dataUrl) } catch {}
-    setCanvasOpen(prev => prev.map((v, i) => (i === dayIdx ? false : v)))
-  }
-
-  const clearSavedImage = (dayIdx: number) => {
-    setSavedImages(prev => prev.map((v, i) => (i === dayIdx ? null : v)))
-    localStorage.removeItem(SAVED_KEY(weekKey, dayIdx))
+  const handleDiary = (dayIdx: number, value: string) => {
+    setDiaryTexts(prev => prev.map((v, i) => i === dayIdx ? value : v))
+    if (diaryTimers.current[dayIdx]) clearTimeout(diaryTimers.current[dayIdx]!)
+    diaryTimers.current[dayIdx] = setTimeout(() => {
+      saveDiaryEntry(weekKey, dayIdx, value)
+    }, 500)
   }
 
   // ── Goal ──────────────────────────────────────────────
@@ -262,7 +253,6 @@ export default function WeeklyPlanner() {
           const isToday  = isThisWeek && dayIdx === todayDay
           const doneCnt  = todos[dayIdx].filter(t => t.done).length
           const totalCnt = todos[dayIdx].length
-          const savedImg = savedImages[dayIdx]
 
           return (
             <div
@@ -281,11 +271,11 @@ export default function WeeklyPlanner() {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
-                    onClick={() => toggleCanvas(dayIdx)}
+                    onClick={() => toggleDiary(dayIdx)}
                     className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full transition-colors
-                      ${canvasOpen[dayIdx] ? 'bg-white/80 text-slate-700' : 'bg-white/40 text-slate-600 hover:bg-white/70'}`}
+                      ${diaryOpen[dayIdx] ? 'bg-white/80 text-slate-700' : 'bg-white/40 text-slate-600 hover:bg-white/70'}`}
                   >
-                    <PenIcon />필기
+                    ✏️ 일기
                   </button>
                   {isToday && (
                     <span className="text-[11px] font-medium bg-white/70 text-slate-600 rounded-full px-2 py-0.5">
@@ -349,31 +339,15 @@ export default function WeeklyPlanner() {
                 )
               })()}
 
-              {/* 저장된 필기 이미지 */}
-              {savedImg && !canvasOpen[dayIdx] && (
-                <div className="px-3 pb-2 group/img relative">
-                  <img src={savedImg} alt="필기" className="w-full rounded-lg ring-1 ring-black/10" />
-                  <div className="absolute top-1 right-4 flex gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                    <button onClick={() => toggleCanvas(dayIdx)}
-                      className="text-[10px] bg-white/90 text-slate-600 rounded-md px-2 py-0.5 shadow-sm hover:bg-white">
-                      편집
-                    </button>
-                    <button onClick={() => clearSavedImage(dayIdx)}
-                      className="text-[10px] bg-white/90 text-slate-500 rounded-md px-2 py-0.5 shadow-sm hover:bg-white">
-                      삭제
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* 필기 캔버스 */}
-              {canvasOpen[dayIdx] && (
+              {/* 일기 입력창 */}
+              {diaryOpen[dayIdx] && (
                 <div className="px-3 pb-2">
-                  <DrawingCanvas
-                    dayKey={DAY_KEY(weekKey, dayIdx)}
-                    headerBg={style.header}
-                    onSave={dataUrl => handleCanvasSave(dayIdx, dataUrl)}
-                    onClose={() => toggleCanvas(dayIdx)}
+                  <textarea
+                    value={diaryTexts[dayIdx]}
+                    onChange={e => handleDiary(dayIdx, e.target.value)}
+                    placeholder="오늘 하루를 기록해보세요..."
+                    rows={4}
+                    className="w-full text-sm text-slate-700 bg-white/70 rounded-xl px-3 py-2.5 outline-none ring-1 ring-black/10 focus:ring-violet-300 transition-colors placeholder:text-slate-400 resize-none leading-relaxed"
                   />
                 </div>
               )}

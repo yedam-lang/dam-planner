@@ -326,3 +326,29 @@ export async function deleteWordEntry(local_id: number) {
     .eq('user_id', uid)
     .eq('local_id', local_id)
 }
+
+// ── Planner Diary ──────────────────────────────────────
+export async function loadDiaryEntry(weekKey: string, dayIndex: number): Promise<string> {
+  const uid = await getUserId()
+  if (!uid) return ''
+  const { data } = await supabase
+    .from('planner_diary')
+    .select('content')
+    .eq('user_id', uid)
+    .eq('week_date', weekKey)
+    .eq('day_index', dayIndex)
+    .maybeSingle()
+  return data?.content ?? ''
+}
+
+export async function saveDiaryEntry(weekKey: string, dayIndex: number, content: string) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('planner_diary').upsert({
+    user_id: uid,
+    week_date: weekKey,
+    day_index: dayIndex,
+    content,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id,week_date,day_index' })
+}
