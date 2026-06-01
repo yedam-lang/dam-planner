@@ -67,14 +67,31 @@ export async function upsertTodo(todo: {
 }) {
   const uid = await getUserId()
   if (!uid) return
-  await supabase.from('todos').upsert({
-    user_id: uid,
-    week_date: todo.week_key,
-    day_index: todo.day_index,
-    local_id: todo.local_id,
-    text: todo.text,
-    done: todo.done,
-  })
+
+  const { data: existing } = await supabase
+    .from('todos')
+    .select('id')
+    .eq('user_id', uid)
+    .eq('week_date', todo.week_key)
+    .eq('local_id', todo.local_id)
+    .maybeSingle()
+
+  if (existing) {
+    await supabase.from('todos')
+      .update({ text: todo.text, done: todo.done })
+      .eq('user_id', uid)
+      .eq('week_date', todo.week_key)
+      .eq('local_id', todo.local_id)
+  } else {
+    await supabase.from('todos').insert({
+      user_id: uid,
+      week_date: todo.week_key,
+      day_index: todo.day_index,
+      local_id: todo.local_id,
+      text: todo.text,
+      done: todo.done,
+    })
+  }
 }
 
 export async function deleteTodo(weekKey: string, local_id: number) {
