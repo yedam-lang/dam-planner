@@ -173,6 +173,7 @@ export async function upsertNoteCategory(cat: {
   emoji: string
   color_index: number
   sort_order: number
+  cards?: { id: number; text: string }[]
 }) {
   const uid = await getUserId()
   if (!uid) return
@@ -183,6 +184,7 @@ export async function upsertNoteCategory(cat: {
     emoji: cat.emoji,
     color_index: cat.color_index,
     sort_order: cat.sort_order,
+    cards: cat.cards ?? [],
   }, { onConflict: 'user_id,key' })
 }
 

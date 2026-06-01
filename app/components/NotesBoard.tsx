@@ -81,18 +81,19 @@ export default function NotesBoard() {
         const localRaw = localStorage.getItem(STORAGE_KEY)
         const localCats = localRaw ? JSON.parse(localRaw) as Category[] : []
 
+        
         const merged = data.map(row => {
           const palette = COLOR_PALETTE[row.color_index % COLOR_PALETTE.length]
-          const localCat = localCats.find(c => c.key === row.key)
           return {
             key: row.key,
             name: row.name,
             emoji: row.emoji,
             colorIndex: row.color_index,
             ...palette,
-            cards: localCat?.cards ?? [],
+            cards: row.cards ?? [],
           }
         })
+
         setCategories(merged)
         saveLocal(merged)
       } else {
@@ -113,18 +114,19 @@ export default function NotesBoard() {
   useEffect(() => { if (addingCategory) newCatInputRef.current?.focus() }, [addingCategory])
 
   const syncCategories = (cats: Category[]) => {
-    setCategories(cats)
-    saveLocal(cats)
-    cats.forEach((cat, i) => {
-      upsertNoteCategory({
-        key: cat.key,
-        name: cat.name,
-        emoji: cat.emoji,
-        color_index: cat.colorIndex,
-        sort_order: i,
-      })
+  setCategories(cats)
+  saveLocal(cats)
+  cats.forEach((cat, i) => {
+    upsertNoteCategory({
+      key: cat.key,
+      name: cat.name,
+      emoji: cat.emoji,
+      color_index: cat.colorIndex,
+      sort_order: i,
+      cards: cat.cards,
     })
-  }
+  })
+}
 
   /* ---- 카드 추가 ---- */
   const startAdding = (key: string) => { setAddingKey(key); setDraftText('') }
