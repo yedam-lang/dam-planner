@@ -10,16 +10,17 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [sent, setSent] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ?? null)
-      setLoading(false)
-    }).catch(() => {
+    // URL hash에서 세션 복구 (Magic Link 클릭 후)
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null)
       setLoading(false)
     })
+
     const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
       setUser(session?.user ?? null)
       setLoading(false)
     })
+
     return () => listener.subscription.unsubscribe()
   }, [])
 
