@@ -154,3 +154,67 @@ export async function loadWeekCalendarEvents(weekStart: Date) {
   }
   return result
 }
+
+// ── Notes ──────────────────────────────────────────────
+export async function loadNoteCategories() {
+  const uid = await getUserId()
+  if (!uid) return null
+  const { data } = await supabase
+    .from('note_categories')
+    .select('*')
+    .eq('user_id', uid)
+    .order('sort_order')
+  return data
+}
+
+export async function upsertNoteCategory(cat: {
+  key: string
+  name: string
+  emoji: string
+  color_index: number
+  sort_order: number
+}) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('note_categories').upsert({
+    user_id: uid,
+    key: cat.key,
+    name: cat.name,
+    emoji: cat.emoji,
+    color_index: cat.color_index,
+    sort_order: cat.sort_order,
+  }, { onConflict: 'user_id,key' })
+}
+
+export async function deleteNoteCategory(key: string) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('note_categories').delete().eq('user_id', uid).eq('key', key)
+}
+
+export async function loadNoteBody(cardId: string) {
+  const uid = await getUserId()
+  if (!uid) return null
+  const { data } = await supabase
+    .from('note_bodies')
+    .select('*')
+    .eq('user_id', uid)
+    .eq('card_id', cardId)
+    .maybeSingle()
+  return data
+}
+
+export async function upsertNoteBody(cardId: string, body: string, canvasData?: string, cardTitle?: string) {
+  const uid = await getUserId()
+  if (!uid) return
+  const payload: Record<string, string> = { user_id: uid, card_id: cardId, body }
+  if (canvasData !== undefined) payload.canvas_data = canvasData
+  if (cardTitle !== undefined) payload.card_title = cardTitle
+  await supabase.from('note_bodies').upsert(payload, { onConflict: 'user_id,card_id' })
+}
+
+export async function deleteNoteBody(cardId: string) {
+  const uid = await getUserId()
+  if (!uid) return
+  await supabase.from('note_bodies').delete().eq('user_id', uid).eq('card_id', cardId)
+}

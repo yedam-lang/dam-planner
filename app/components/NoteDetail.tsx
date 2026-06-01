@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import NoteCanvas from './NoteCanvas'
+import { loadNoteBody, upsertNoteBody } from '@/lib/db'
 
 type Props = { id: string }
 
-function loadCardInfo(id: string): { catName: string; catEmoji: string; cardText: string } | null {
+function loadCardInfoLocal(id: string): { catName: string; catEmoji: string; cardText: string } | null {
   try {
     const raw = localStorage.getItem('dam-notes')
     if (!raw) return null
@@ -22,7 +23,7 @@ function loadCardInfo(id: string): { catName: string; catEmoji: string; cardText
   return null
 }
 
-function saveTitle(id: string, newTitle: string) {
+function saveTitleLocal(id: string, newTitle: string) {
   try {
     const raw = localStorage.getItem('dam-notes')
     if (!raw) return
@@ -46,24 +47,40 @@ export default function NoteDetail({ id }: Props) {
   const [catInfo, setCatInfo] = useState<{ catName: string; catEmoji: string } | null>(null)
   const [title, setTitle] = useState('')
   const [bodyText, setBodyText] = useState('')
+  const [loaded, setLoaded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    const info = loadCardInfo(id)
+    const info = loadCardInfoLocal(id)
     if (info) {
       setCatInfo({ catName: info.catName, catEmoji: info.catEmoji })
       setTitle(info.cardText)
     }
-    setBodyText(localStorage.getItem(BODY_KEY) ?? '')
+
+    // Supabase에서 본문 로드
+    loadNoteBody(id).then(data => {
+      if (data) {
+        setBodyText(data.body ?? '')
+        if (data.card_title) setTitle(data.card_title)
+      } else {
+        // 폴백: localStorage
+        setBodyText(localStorage.getItem(BODY_KEY) ?? '')
+      }
+      setLoaded(true)
+    })
   }, [id, BODY_KEY])
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setTitle(val)
-    saveTitle(id, val)
+    saveTitleLocal(id, val)
+    if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current)
+    bodyTimerRef.current = setTimeout(() => {
+      upsertNoteBody(id, bodyText, undefined, val)
+    }, 500)
   }
 
-  // textarea 자동 높이 조절
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -75,16 +92,23 @@ export default function NoteDetail({ id }: Props) {
     const text = e.target.value
     setBodyText(text)
     try { localStorage.setItem(BODY_KEY, text) } catch {}
+    if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current)
+    bodyTimerRef.current = setTimeout(() => {
+      upsertNoteBody(id, text, undefined, title)
+    }, 500)
   }
+
+  if (!loaded) return (
+    <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">
+      로딩 중...
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 via-purple-50 to-sky-50 px-4 py-8 pb-24">
-      {/* 상단 네비게이션 */}
       <div className="max-w-2xl mx-auto mb-6 flex items-center gap-3">
-        <Link
-          href="/notes"
-          className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
-        >
+        <Link href="/notes"
+          className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
             className="w-4 h-4">
@@ -100,7 +124,6 @@ export default function NoteDetail({ id }: Props) {
       </div>
 
       <div className="max-w-2xl mx-auto space-y-6">
-        {/* 제목 */}
         <input
           value={title}
           onChange={handleTitleChange}
@@ -108,10 +131,8 @@ export default function NoteDetail({ id }: Props) {
           className="w-full text-xl font-bold text-slate-700 placeholder:text-slate-300 bg-transparent outline-none border-b-2 border-transparent focus:border-violet-300 transition-colors pb-1 leading-snug"
         />
 
-        {/* 구분선 */}
         <div className="border-t border-slate-200" />
 
-        {/* 텍스트 노트 영역 */}
         <section>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
             텍스트 노트
@@ -127,10 +148,8 @@ export default function NoteDetail({ id }: Props) {
           </div>
         </section>
 
-        {/* 구분선 */}
         <div className="border-t border-slate-200" />
 
-        {/* 필기 캔버스 영역 */}
         <section>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
             필기 캔버스

@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { upsertNoteBody, loadNoteBody } from '@/lib/db'
 
 const PEN_COLORS = [
   { value: '#374151' }, { value: '#f43f5e' }, { value: '#8b5cf6' },
@@ -22,7 +23,14 @@ export default function NoteCanvas({ noteId }: Props) {
   const save = useCallback((showFeedback = false) => {
     const canvas = canvasRef.current
     if (!canvas) return
-    try { localStorage.setItem(STORAGE_KEY, canvas.toDataURL('image/png')) } catch {}
+    const dataUrl = canvas.toDataURL('image/png')
+    try { localStorage.setItem(STORAGE_KEY, dataUrl) } catch {}
+
+    // Supabase에 캔버스 저장
+    upsertNoteBody(noteId, '', dataUrl).catch(err =>
+      console.error('[NoteCanvas] 저장 실패:', err)
+    )
+
     if (showFeedback) {
       const now = new Date()
       const hh = String(now.getHours()).padStart(2, '0')
@@ -31,9 +39,9 @@ export default function NoteCanvas({ noteId }: Props) {
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
       savedTimerRef.current = setTimeout(() => setSavedAt(null), 2500)
     }
-  }, [STORAGE_KEY])
+  }, [STORAGE_KEY, noteId])
 
-  const initCanvas = useCallback(() => {
+  const initCanvas = useCallback((dataUrl?: string) => {
     const canvas = canvasRef.current
     if (!canvas) return
     const dpr = window.devicePixelRatio || 1
@@ -47,15 +55,24 @@ export default function NoteCanvas({ noteId }: Props) {
     ctx.scale(dpr, dpr)
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, w, h)
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
+    const src = dataUrl ?? localStorage.getItem(STORAGE_KEY)
+    if (src) {
       const img = new Image()
       img.onload = () => ctx.drawImage(img, 0, 0, w, h)
-      img.src = saved
+      img.src = src
     }
   }, [STORAGE_KEY])
 
-  useEffect(() => { requestAnimationFrame(initCanvas) }, [initCanvas])
+  useEffect(() => {
+    // Supabase에서 캔버스 데이터 로드
+    loadNoteBody(noteId).then(data => {
+      if (data?.canvas_data) {
+        requestAnimationFrame(() => initCanvas(data.canvas_data))
+      } else {
+        requestAnimationFrame(() => initCanvas())
+      }
+    })
+  }, [noteId, initCanvas])
 
   const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect()
@@ -102,7 +119,6 @@ export default function NoteCanvas({ noteId }: Props) {
 
   return (
     <div className="rounded-2xl overflow-hidden ring-1 ring-black/10 shadow-sm">
-      {/* 툴바 */}
       <div className="bg-slate-100 flex items-center gap-2 px-3 py-2">
         <div className="flex items-center gap-1.5">
           {PEN_COLORS.map(c => (
@@ -131,12 +147,9 @@ export default function NoteCanvas({ noteId }: Props) {
         >
           전체 지우기
         </button>
-
         <div className="ml-auto flex items-center gap-2">
           {savedAt && (
-            <span className="text-[11px] text-slate-400 transition-opacity">
-              {savedAt} 저장됨 ✓
-            </span>
+            <span className="text-[11px] text-slate-400">{savedAt} 저장됨 ✓</span>
           )}
           <button
             onClick={() => save(true)}
@@ -147,7 +160,6 @@ export default function NoteCanvas({ noteId }: Props) {
         </div>
       </div>
 
-      {/* 캔버스 */}
       <canvas
         ref={canvasRef}
         style={{

@@ -2,6 +2,12 @@
 
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import {
+  loadNoteCategories,
+  upsertNoteCategory,
+  deleteNoteCategory,
+  deleteNoteBody,
+} from '@/lib/db'
 
 type Card = { id: number; text: string }
 
@@ -15,6 +21,7 @@ type Category = {
   btn: string
   ring: string
   cards: Card[]
+  colorIndex: number
 }
 
 const COLOR_PALETTE = [
@@ -30,14 +37,14 @@ const COLOR_PALETTE = [
 const EMOJIS = ['🎯', '🏃', '🌱', '✦', '📋', '💡', '🎨', '📚', '💪', '🌟']
 
 const INITIAL: Category[] = [
-  { key: 'career',   name: '진로', emoji: '🎯', ...COLOR_PALETTE[0], cards: [] },
-  { key: 'activity', name: '활동', emoji: '🏃', ...COLOR_PALETTE[1], cards: [] },
-  { key: 'growth',   name: '성장', emoji: '🌱', ...COLOR_PALETTE[2], cards: [] },
+  { key: 'career',   name: '진로', emoji: '🎯', ...COLOR_PALETTE[0], colorIndex: 0, cards: [] },
+  { key: 'activity', name: '활동', emoji: '🏃', ...COLOR_PALETTE[1], colorIndex: 1, cards: [] },
+  { key: 'growth',   name: '성장', emoji: '🌱', ...COLOR_PALETTE[2], colorIndex: 2, cards: [] },
 ]
 
 const STORAGE_KEY = 'dam-notes'
 
-function save(cats: Category[]) {
+function saveLocal(cats: Category[]) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cats)) } catch {}
 }
 
@@ -50,6 +57,7 @@ export default function NotesBoard() {
   const [addingCategory, setAddingCategory] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+  const [deletingKey, setDeletingKey] = useState<string | null>(null)
 
   const toggleExpand = (key: string) =>
     setExpandedCards(prev => {
@@ -65,33 +73,61 @@ export default function NotesBoard() {
   const titleInputRef = useRef<HTMLInputElement>(null)
   const newCatInputRef = useRef<HTMLInputElement>(null)
 
-  // localStorage에서 로드
+  // 로드: Supabase 우선, 없으면 localStorage
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
-    try {
-      const data = JSON.parse(raw)
-      if (Array.isArray(data)) setCategories(data)
-    } catch {}
+    loadNoteCategories().then(data => {
+      if (data && data.length > 0) {
+        // Supabase 데이터로 복원
+        const localRaw = localStorage.getItem(STORAGE_KEY)
+        const localCats = localRaw ? JSON.parse(localRaw) as Category[] : []
+
+        const merged = data.map(row => {
+          const palette = COLOR_PALETTE[row.color_index % COLOR_PALETTE.length]
+          const localCat = localCats.find(c => c.key === row.key)
+          return {
+            key: row.key,
+            name: row.name,
+            emoji: row.emoji,
+            colorIndex: row.color_index,
+            ...palette,
+            cards: localCat?.cards ?? [],
+          }
+        })
+        setCategories(merged)
+        saveLocal(merged)
+      } else {
+        // localStorage 폴백
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (raw) {
+          try {
+            const data = JSON.parse(raw)
+            if (Array.isArray(data)) setCategories(data)
+          } catch {}
+        }
+      }
+    })
   }, [])
 
-  useEffect(() => {
-    if (addingKey) textareaRef.current?.focus()
-  }, [addingKey])
+  useEffect(() => { if (addingKey) textareaRef.current?.focus() }, [addingKey])
+  useEffect(() => { if (editingKey) titleInputRef.current?.focus() }, [editingKey])
+  useEffect(() => { if (addingCategory) newCatInputRef.current?.focus() }, [addingCategory])
 
-  useEffect(() => {
-    if (editingKey) titleInputRef.current?.focus()
-  }, [editingKey])
-
-  useEffect(() => {
-    if (addingCategory) newCatInputRef.current?.focus()
-  }, [addingCategory])
+  const syncCategories = (cats: Category[]) => {
+    setCategories(cats)
+    saveLocal(cats)
+    cats.forEach((cat, i) => {
+      upsertNoteCategory({
+        key: cat.key,
+        name: cat.name,
+        emoji: cat.emoji,
+        color_index: cat.colorIndex,
+        sort_order: i,
+      })
+    })
+  }
 
   /* ---- 카드 추가 ---- */
-  const startAdding = (key: string) => {
-    setAddingKey(key)
-    setDraftText('')
-  }
+  const startAdding = (key: string) => { setAddingKey(key); setDraftText('') }
 
   const confirmAdd = (key: string) => {
     const text = draftText.trim()
@@ -101,43 +137,40 @@ export default function NotesBoard() {
         ? { ...cat, cards: [...cat.cards, { id: Date.now(), text }] }
         : cat
     )
-    setCategories(next)
-    save(next)
+    syncCategories(next)
     setAddingKey(null)
     setDraftText('')
   }
 
   /* ---- 보드 삭제 ---- */
-  const [deletingKey, setDeletingKey] = useState<string | null>(null)
-
   const confirmDeleteCategory = (key: string) => {
+    const cat = categories.find(c => c.key === key)
+    if (cat) {
+      cat.cards.forEach(card => deleteNoteBody(card.id.toString()))
+    }
+    deleteNoteCategory(key)
     const next = categories.filter(cat => cat.key !== key)
-    setCategories(next)
-    save(next)
+    syncCategories(next)
     setDeletingKey(null)
   }
 
   /* ---- 카드 삭제 ---- */
   const deleteCard = (catKey: string, cardId: number) => {
+    deleteNoteBody(cardId.toString())
     const next = categories.map(cat =>
       cat.key === catKey ? { ...cat, cards: cat.cards.filter(c => c.id !== cardId) } : cat
     )
-    setCategories(next)
-    save(next)
+    syncCategories(next)
   }
 
   /* ---- 제목 수정 ---- */
-  const startRename = (key: string, name: string) => {
-    setEditingKey(key)
-    setEditingName(name)
-  }
+  const startRename = (key: string, name: string) => { setEditingKey(key); setEditingName(name) }
 
   const confirmRename = (key: string) => {
     const name = editingName.trim()
     if (name) {
       const next = categories.map(cat => cat.key === key ? { ...cat, name } : cat)
-      setCategories(next)
-      save(next)
+      syncCategories(next)
     }
     setEditingKey(null)
   }
@@ -152,12 +185,12 @@ export default function NotesBoard() {
       key: `cat-${Date.now()}`,
       name,
       emoji: EMOJIS[emojiIdx],
+      colorIndex: colorIdx,
       ...COLOR_PALETTE[colorIdx],
       cards: [],
     }
     const next = [...categories, newCat]
-    setCategories(next)
-    save(next)
+    syncCategories(next)
     setAddingCategory(false)
     setNewCatName('')
   }
@@ -194,7 +227,6 @@ export default function NotesBoard() {
                 ) : (
                   <button
                     onClick={() => startRename(cat.key, cat.name)}
-                    title="클릭해서 이름 수정"
                     className="font-semibold text-slate-700 text-sm hover:underline text-left truncate"
                   >
                     {cat.name}
@@ -206,30 +238,21 @@ export default function NotesBoard() {
                 <span className="text-xs bg-white/60 text-slate-500 rounded-full px-2 py-0.5">
                   {cat.cards.length}
                 </span>
-
-                {/* 삭제 확인 */}
                 {deletingKey === cat.key ? (
                   <div className="flex items-center gap-1">
                     <span className="text-[11px] text-slate-600">삭제할까요?</span>
-                    <button
-                      onClick={() => confirmDeleteCategory(cat.key)}
-                      className="text-[11px] font-semibold bg-rose-500 text-white rounded-md px-2 py-0.5 hover:bg-rose-600 transition-colors"
-                    >
+                    <button onClick={() => confirmDeleteCategory(cat.key)}
+                      className="text-[11px] font-semibold bg-rose-500 text-white rounded-md px-2 py-0.5 hover:bg-rose-600 transition-colors">
                       삭제
                     </button>
-                    <button
-                      onClick={() => setDeletingKey(null)}
-                      className="text-[11px] text-slate-500 bg-white/60 rounded-md px-2 py-0.5 hover:bg-white/90 transition-colors"
-                    >
+                    <button onClick={() => setDeletingKey(null)}
+                      className="text-[11px] text-slate-500 bg-white/60 rounded-md px-2 py-0.5 hover:bg-white/90 transition-colors">
                       취소
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setDeletingKey(cat.key)}
-                    className="opacity-0 group-hover/header:opacity-100 text-slate-400 hover:text-rose-500 transition-all"
-                    title="보드 삭제"
-                  >
+                  <button onClick={() => setDeletingKey(cat.key)}
+                    className="opacity-0 group-hover/header:opacity-100 text-slate-400 hover:text-rose-500 transition-all">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
                       className="w-3.5 h-3.5">
@@ -250,7 +273,6 @@ export default function NotesBoard() {
                 const isExpanded = expandedCards.has(expandKey)
                 return (
                   <div key={card.id} className="group flex items-start gap-2">
-                    {/* 토글 버튼 — 왼쪽 */}
                     <button
                       onClick={() => toggleExpand(expandKey)}
                       className={`flex-shrink-0 mt-0.5 w-6 h-6 flex items-center justify-center rounded-lg transition-all
@@ -262,24 +284,18 @@ export default function NotesBoard() {
                         <polyline points="9 18 15 12 9 6" />
                       </svg>
                     </button>
-
-                    {/* 카드 본문 */}
                     <div className={`flex-1 min-w-0 ${cat.cardBg} rounded-xl shadow-sm ring-1 ring-black/5`}>
                       <div className="flex items-center gap-2 px-3 py-2.5">
-                        <Link
-                          href={`/notes/${card.id}`}
-                          className="flex-1 text-sm text-slate-700 truncate leading-snug hover:underline"
-                        >
+                        <Link href={`/notes/${card.id}`}
+                          className="flex-1 text-sm text-slate-700 truncate leading-snug hover:underline">
                           {getPreview(card.text)}
                         </Link>
                         <button
                           onClick={e => { e.stopPropagation(); deleteCard(cat.key, card.id) }}
-                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 text-lg leading-none transition-all flex-shrink-0"
-                        >
+                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 text-lg leading-none transition-all flex-shrink-0">
                           ×
                         </button>
                       </div>
-
                       {isExpanded && (
                         <div className="px-3 pb-3 pt-0.5 border-t border-black/5">
                           <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">
@@ -292,7 +308,6 @@ export default function NotesBoard() {
                 )
               })}
 
-              {/* 인라인 입력 폼 */}
               {addingKey === cat.key && (
                 <div className={`${cat.cardBg} rounded-xl px-3 py-2.5 ring-1 ring-black/10 shadow-sm`}>
                   <textarea
@@ -308,16 +323,12 @@ export default function NotesBoard() {
                     className="w-full text-sm text-slate-700 placeholder:text-slate-400 bg-transparent outline-none resize-none leading-relaxed"
                   />
                   <div className="flex justify-end gap-1.5 mt-1.5">
-                    <button
-                      onClick={() => setAddingKey(null)}
-                      className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg transition-colors"
-                    >
+                    <button onClick={() => setAddingKey(null)}
+                      className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg transition-colors">
                       취소
                     </button>
-                    <button
-                      onClick={() => confirmAdd(cat.key)}
-                      className={`text-xs font-medium text-slate-700 px-3 py-1 rounded-lg transition-colors ${cat.btn}`}
-                    >
+                    <button onClick={() => confirmAdd(cat.key)}
+                      className={`text-xs font-medium text-slate-700 px-3 py-1 rounded-lg transition-colors ${cat.btn}`}>
                       추가
                     </button>
                   </div>
@@ -325,13 +336,10 @@ export default function NotesBoard() {
               )}
             </div>
 
-            {/* 카드 추가 버튼 */}
             {addingKey !== cat.key && (
               <div className="px-3 pb-3">
-                <button
-                  onClick={() => startAdding(cat.key)}
-                  className={`w-full flex items-center justify-center gap-1.5 text-sm text-slate-600 font-medium py-2 rounded-xl transition-colors ${cat.btn}`}
-                >
+                <button onClick={() => startAdding(cat.key)}
+                  className={`w-full flex items-center justify-center gap-1.5 text-sm text-slate-600 font-medium py-2 rounded-xl transition-colors ${cat.btn}`}>
                   <span className="text-base leading-none">+</span>
                   카드 추가
                 </button>
@@ -340,7 +348,6 @@ export default function NotesBoard() {
           </div>
         ))}
 
-        {/* 새 노트 보드 추가 */}
         {addingCategory ? (
           <div className="flex flex-col justify-center rounded-2xl ring-1 ring-black/10 bg-white/50 shadow-sm p-5 gap-3">
             <p className="text-sm font-medium text-slate-600">새 노트 보드</p>
@@ -356,25 +363,19 @@ export default function NotesBoard() {
               className="text-sm text-slate-700 bg-white/80 outline-none border border-slate-200 rounded-lg px-3 py-1.5 focus:border-slate-400 transition-colors"
             />
             <div className="flex gap-2">
-              <button
-                onClick={() => { setAddingCategory(false); setNewCatName('') }}
-                className="flex-1 text-sm text-slate-500 py-1.5 rounded-xl hover:bg-black/5 transition-colors"
-              >
+              <button onClick={() => { setAddingCategory(false); setNewCatName('') }}
+                className="flex-1 text-sm text-slate-500 py-1.5 rounded-xl hover:bg-black/5 transition-colors">
                 취소
               </button>
-              <button
-                onClick={confirmAddCategory}
-                className="flex-1 text-sm font-medium text-slate-700 py-1.5 rounded-xl bg-violet-200 hover:bg-violet-300 transition-colors"
-              >
+              <button onClick={confirmAddCategory}
+                className="flex-1 text-sm font-medium text-slate-700 py-1.5 rounded-xl bg-violet-200 hover:bg-violet-300 transition-colors">
                 만들기
               </button>
             </div>
           </div>
         ) : (
-          <button
-            onClick={() => setAddingCategory(true)}
-            className="flex items-center justify-center gap-2 h-28 rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-violet-300 hover:text-violet-400 transition-colors text-sm font-medium"
-          >
+          <button onClick={() => setAddingCategory(true)}
+            className="flex items-center justify-center gap-2 h-28 rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 hover:border-violet-300 hover:text-violet-400 transition-colors text-sm font-medium">
             <span className="text-xl leading-none">+</span>
             새 노트 보드
           </button>
